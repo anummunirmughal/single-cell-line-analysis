@@ -94,7 +94,7 @@ java -jar "$PICARD_PATH/picard.jar" MarkDuplicates \
 
 # Step 8: Index final BAM file
 echo "Indexing the final BAM file..."
-"$SAMTOOLS_PATH/samtools" index -@ "$THREADS" "$OUTPUT_DIR/aligned_reads_dedup.bam"
+"$SAMTOOLS_PATH/samtools" index -@ "$CPU_NUM" "$OUTPUT_DIR/aligned_reads_dedup.bam"
 
 #Step 9: Basecalibration
 echo "Step 9: basecalibration..."
@@ -116,14 +116,19 @@ echo "Step 10: Scoring of calibration"
   -R "$GENOME" \
   --bqsr-recal-file "$OUTPUT_DIR/recal_chr1.table" \
   -O "$OUTPUT_DIR/BQSR/chr1_sort_dup_bqsr.bam" \
-  
+if [ $? -ne 0 ]; then
+    echo "Error: ApplyBQSR failed!"
+    exit 1
+fi  
   
 # Step 11: Generate VCF using bcftools mpileup and call variants
 echo "Step 11: Running bcftools mpileup and variant calling..."
-"$BCFTOOLS_PATH" mpileup -Ou \
-  -f "$GENOME" \
-  "$OUTPUT_DIR/chr1_sort_dup_bqsr.bam" | \
+"$BCFTOOLS_PATH" mpileup -Ou -f "$GENOME" "$OUTPUT_DIR/chr1_sort_dup_bqsr.bam" | \
   "$BCFTOOLS_PATH" call -mv -Ob -o "$OUTPUT_DIR/raw_calls.bcf"
+if [ $? -ne 0 ]; then
+    echo "Error: Variant calling failed!"
+    exit 1
+fi
 
 # Step 12: Filter variants based on quality
 echo "Step 12: Filtering variants..."
@@ -133,6 +138,10 @@ echo "Step 12: Filtering variants..."
 # Step 13: Convert to VCF format
 echo "Step 13: Converting to VCF format..."
 "$BCFTOOLS_PATH" view "$OUTPUT_DIR/filtered_calls.bcf" > "$OUTPUT_DIR/final_variants.vcf"
+if [ $? -ne 0 ]; then
+    echo "Error: Filtering or VCF conversion failed!"
+    exit 1
+fi
 
 echo "Variant calling and filtering completed!"
   
