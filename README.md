@@ -9,3 +9,10 @@ After running the command analyse the output of parse_FastQC
 #Low Quality Bases: If FastQC reports low quality in the ends of reads, you may need to trim low-quality bases using tools like Trimmomatic.
 #Overrepresented Sequences: If FastQC reports overrepresented sequences (other than adapters), trimming may be needed.
 #GC content: if FastQC reports low GC content, trimming is necessary.
+
+#Trim the duplicated sequences using trimommatic.
+#Run the rest of variant_calling script.
+
+# Annotate the identified variants
+#annotate identified variants from snpeff, cosmic, and gnomad using annotation.sh script.
+
