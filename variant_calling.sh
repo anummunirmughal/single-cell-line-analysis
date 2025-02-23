@@ -145,13 +145,3 @@ fi
 
 echo "Variant calling and filtering completed!"
   
-Step 14: Annotate variants with snpEff
-echo "Step 14: Annotating variants with snpEff..."
-java -jar "$SNPEFF_PATH/snpEff.jar" -v hg38 \
-     "$OUTPUT_DIR/final_variants.vcf" > "$OUTPUT_DIR/annotated_variants.vcf"
-if [ $? -ne 0 ]; then
-    echo "Error: snpEff annotation failed!"
-    exit 1
-fi
-
-echo "Workflow completed successfully!"
