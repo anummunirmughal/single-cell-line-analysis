@@ -1,5 +1,4 @@
 #!/bin/bash
-<<<<<<< Updated upstream
 #SBATCH --partition=biosoc2
 #SBATCH --time=UNLIMITED
 #SBATCH --cpus-per-task=20
