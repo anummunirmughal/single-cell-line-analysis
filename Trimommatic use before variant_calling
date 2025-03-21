@@ -1,0 +1,134 @@
+#SBATCH --time=UNLIMITED
+#SBATCH --cpus-per-task=20
+#SBATCH --array=1-4 ### Change this for the total samples to analyze
+#SBATCH --output=*.%A.%a.out
+
+### sequencing Project - Script 01 ###
+
+# Paths
+SOFTWARE_DIR="/home/anum/software"
+INPUT_DIR="/home/anum/single_cell_lines/input"
+OUTPUT_DIR="/home/anum/single_cell_lines/output"
+
+# Default paths for software tools
+INDEX_PATH="$SOFTWARE_DIR/hg38/Homo_sapiens_assembly38"
+DB_PATH="$SOFTWARE_DIR/dbsnp/Homo_sapiens_assembly38.dbsnp138.vcf"
+FASTQC_PATH="$SOFTWARE_DIR/FastQC"
+TRIMMOMATIC_PATH="$SOFTWARE_DIR/Trimmomatic-0.39"
+BWA_PATH="$SOFTWARE_DIR/bwa-0.7.17"
+PICARD_PATH="$SOFTWARE_DIR/picard-2.17.10"
+GATK_PATH="$SOFTWARE_DIR/gatk-4.2.6.1"
+SAMTOOLS_PATH="$SOFTWARE_DIR/samtools-1.15.1"
+BCFTOOLS_PATH="$SOFTWARE_DIR/bcftools-1.15.1"
+VEP_PATH="$SOFTWARE_DIR/ensembl-vep"
+
+# Parameters
+REMOVE_INTERMEDIATE="n"
+REMOVE_LOGS="n"
+PRINT_COMMANDS="n"
+
+# Usage information
+USAGE="
+Usage: $(basename "$0") -i INPUT_DIR -o OUTPUT_DIR [options]
+
+Required Arguments:
+  -i  Input directory containing FASTQ files (default: $INPUT_DIR)
+  -o  Output directory for results (default: $OUTPUT_DIR)
+
+Optional Arguments:
+  -rmf   Remove intermediate files (y/n) [default: $REMOVE_INTERMEDIATE]
+  -rme   Remove error logs (y/n) [default: $REMOVE_LOGS]
+  -cpu   Number of CPUs to use in parallel (default: $CPU_NUM)
+  -vcpu  Number of CPUs for VEP parallelization (default: $VEP_CPU_NUM)
+  -cl    Print commands only (y/n) [default: $PRINT_COMMANDS]
+"
+
+
+# Print settings
+echo "Input Directory: $INPUT_DIR"
+echo "Output Directory: $OUTPUT_DIR"
+echo "Remove Intermediate Files: $REMOVE_INTERMEDIATE"
+echo "Remove Logs: $REMOVE_LOGS"
+echo "CPUs: $CPU_NUM"
+echo "VEP CPUs: $VEP_CPU_NUM"
+echo "Commands Only: $PRINT_COMMANDS"
+
+# Main workflow
+if [[ "$PRINT_COMMANDS" == "y" ]]; then
+    echo "Commands will be printed but not executed."
+else
+    echo "Running the workflow..."
+    
+    # Step 1: FastQC
+    echo "Step 1: Running FastQC..."
+    "$FASTQC_PATH/fastqc" -o "$OUTPUT_DIR" "$INPUT_DIR"/*_R1.fastq "$INPUT_DIR"/*_R2.fastq
+    
+    # Step 2: Trimmomatic
+    echo "Step 2: Running Trimmomatic..."
+    java -jar "$TRIMMOMATIC_PATH/trimmomatic.jar" PE -threads "$CPU_NUM" \
+        "$INPUT_DIR"/*_R1.fastq "$INPUT_DIR"/*_R2.fastq \
+        "$OUTPUT_DIR"/trimmed_R1.fastq "$OUTPUT_DIR"/unpaired_R1.fastq \
+        "$OUTPUT_DIR"/trimmed_R2.fastq "$OUTPUT_DIR"/unpaired_R2.fastq \
+        ILLUMINACLIP:"$TRIMMOMATIC_PATH/adapters/TruSeq3-PE.fa":2:30:10
+
+    # Step 3: Align reads with BWA
+    echo "Step 3: Aligning reads with BWA..."
+    "$BWA_PATH/bwa" mem -t "$CPU_NUM" "$INDEX_PATH" \
+        "$OUTPUT_DIR"/trimmed_R1.fastq "$OUTPUT_DIR"/trimmed_R2.fastq > "$OUTPUT_DIR"/aligned_reads.sam
+
+    # Step 4: Convert SAM to BAM
+    echo "Step 4: Converting SAM to BAM..."
+    "$SAMTOOLS_PATH/samtools" view -bS "$OUTPUT_DIR"/aligned_reads.sam > "$OUTPUT_DIR"/aligned_reads.bam
+
+    # Step 5: Sort BAM file
+    echo "Step 5: Sorting BAM file..."
+    "$SAMTOOLS_PATH/samtools" sort -@ "$CPU_NUM" -o "$OUTPUT_DIR"/sorted_reads.bam "$OUTPUT_DIR"/aligned_reads.bam
+
+    # Step 6: Index BAM file
+    echo "Step 6: Indexing BAM file..."
+    "$SAMTOOLS_PATH/samtools" index "$OUTPUT_DIR"/sorted_reads.bam
+
+    # Step 7: Mark duplicates with Picard
+    echo "Step 7: Marking duplicates with Picard..."
+    java -jar "$PICARD_PATH/picard.jar" MarkDuplicates \
+        I="$OUTPUT_DIR"/sorted_reads.bam \
+        O="$OUTPUT_DIR"/dedup_reads.bam \
+        M="$OUTPUT_DIR"/metrics.txt
+
+    # Step 8: Index deduplicated BAM
+    echo "Step 8: Indexing deduplicated BAM file..."
+    "$SAMTOOLS_PATH/samtools" index "$OUTPUT_DIR"/dedup_reads.bam
+
+    # Step 9: Print BAM statistics
+    echo "Step 9: Generating BAM statistics..."
+    "$SAMTOOLS_PATH/samtools" flagstat "$OUTPUT_DIR"/dedup_reads.bam > "$OUTPUT_DIR"/bam_statistics.txt
+
+    # Step 10: Coverage analysis
+    echo "Step 10: Calculating coverage..."
+    "$SAMTOOLS_PATH/samtools" depth "$OUTPUT_DIR"/dedup_reads.bam > "$OUTPUT_DIR"/coverage.txt
+
+    # Step 11: Variant calling with GATK
+    echo "Step 11: Variant calling with GATK..."
+    java -jar "$GATK_PATH/gatk.jar" HaplotypeCaller \
+        -R "$INDEX_PATH" \
+        -I "$OUTPUT_DIR"/dedup_reads.bam \
+        -O "$OUTPUT_DIR"/variants.vcf
+
+    # Step 12: Annotate variants with VEP
+    echo "Step 12: Annotating variants with VEP..."
+    perl "$VEP_PATH/vep" -i "$OUTPUT_DIR"/variants.vcf -o "$OUTPUT_DIR"/annotated_variants.vcf \
+        --cache --dir_cache "$VEP_PATH/cache" --fork "$VEP_CPU_NUM"
+fi
+
+# Cleanup
+if [[ "$REMOVE_INTERMEDIATE" == "y" ]]; then
+    echo "Removing intermediate files..."
+    rm -f "$OUTPUT_DIR"/*.sam "$OUTPUT_DIR"/*.bam "$OUTPUT_DIR"/*.txt
+fi
+
+if [[ "$REMOVE_LOGS" == "y" ]]; then
+    echo "Removing log files..."
+    rm -f "$OUTPUT_DIR"/*.log
+fi
+
+echo "Workflow completed."
