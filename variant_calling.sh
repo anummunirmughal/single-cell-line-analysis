@@ -144,4 +144,3 @@ if [ $? -ne 0 ]; then
 fi
 
 echo "Variant calling and filtering completed!"
-  
